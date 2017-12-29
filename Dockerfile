@@ -1,18 +1,12 @@
-FROM ubuntu:14.04
-MAINTAINER Afterster
-
-RUN echo 'deb http://download.videolan.org/pub/debian/stable/ /' >> /etc/apt/sources.list
-RUN echo 'deb-src http://download.videolan.org/pub/debian/stable/ /' >> /etc/apt/sources.list
-RUN echo 'deb http://archive.ubuntu.com/ubuntu trusty main multiverse' >> /etc/apt/sources.list
-
-RUN apt-get update
-RUN apt-get -y upgrade
-RUN DEBIAN_FRONTEND=noninteractive apt-get -y install wget inotify-tools
-RUN wget -O - https://download.videolan.org/pub/debian/videolan-apt.asc|sudo apt-key add -
-RUN apt-get update
+FROM dramaturg/debian-systemd
+MAINTAINER Sebastian Krohn <seb@ds.ag>
 
 # Need this environment variable otherwise mysql will prompt for passwords
-RUN DEBIAN_FRONTEND=noninteractive apt-get -y install mysql-server apache2 wget php5 php5-json php5-curl php5-mysqlnd pwgen lame libvorbis-dev vorbis-tools flac libmp3lame-dev libavcodec-extra* libfaac-dev libtheora-dev libvpx-dev libav-tools git
+RUN apt-get -y install \
+        nginx wget php7.1 php7.1-cli php7.1-fpm php7.1-json php7.1-curl php7.1-mysqlnd php7.1-gd \
+        php7.1-xml php7.1-readline pwgen lame libvorbis-dev vorbis-tools flac libmp3lame-dev \
+        libavcodec-extra* libfaac-dev libtheora-dev libvpx-dev libav-tools git inotify-tools && \
+    systemctl enable nginx
 
 # Install composer for dependency management
 RUN php -r "readfile('https://getcomposer.org/installer');" | php && \
@@ -21,7 +15,6 @@ RUN php -r "readfile('https://getcomposer.org/installer');" | php && \
 # For local testing / faster builds
 # COPY master.tar.gz /opt/master.tar.gz
 ADD https://github.com/ampache/ampache/archive/master.tar.gz /opt/ampache-master.tar.gz
-ADD ampache.cfg.php.dist /var/temp/ampache.cfg.php.dist
 
 # extraction / installation
 RUN rm -rf /var/www/* && \
@@ -29,22 +22,31 @@ RUN rm -rf /var/www/* && \
     cd /var/www && composer install --prefer-source --no-interaction && \
     chown -R www-data /var/www
 
-# setup mysql like this project does it: https://github.com/tutumcloud/tutum-docker-mysql
-# Remove pre-installed database
 
-RUN rm -rf /var/lib/mysql/*
-ADD create_mysql_admin_user.sh /create_mysql_admin_user.sh
-ADD run.sh /run.sh
-RUN chmod 755 /*.sh
-ENV MYSQL_PASS **Random**
-# Add VOLUMEs to allow backup of config and databases
-VOLUME  ["/etc/mysql", "/var/lib/mysql"]
+ADD ampache.cfg.php /var/www/config/ampache.cfg.php
+ENV conff_ampache /var/www/config/ampache.cfg.php
 
-# setup apache with default ampache vhost
-ADD 001-ampache.conf /etc/apache2/sites-available/
-RUN rm -rf /etc/apache2/sites-enabled/*
-RUN ln -s /etc/apache2/sites-available/001-ampache.conf /etc/apache2/sites-enabled/
-RUN a2enmod rewrite
+ENV DB_HOST mysql
+ENV DB_PORT 3306
+ENV DB_USER ampache
+ENV DB_PASS changeme
+ENV DB_NAME ampache
+
+ENV MAIL_NAME "Ampache"
+ENV MAIL_USER "sound"
+ENV MAIL_DOMAIN "example.org"
+ENV MAIL_PORT 25
+ENV MAIL_HOST localhost
+ENV MAIL_AUTH "false"
+ENV MAIL_AUTHUSER change
+ENV MAIL_AUTHPASS changeme
+
+
+
+# setup nginx
+ADD 001-ampache.conf /etc/nginx/sites-available/
+RUN rm -f /etc/nginx/sites-enabled/default && \
+    ln -s /etc/nginx/sites-available/001-ampache.conf /etc/nginx/sites-enabled/
 
 # Add job to cron to clean the library every night
 RUN echo '30 7    * * *   www-data php /var/www/bin/catalog_update.inc' >> /etc/crontab
@@ -54,4 +56,3 @@ VOLUME ["/var/www/config"]
 VOLUME ["/var/www/themes"]
 EXPOSE 80
 
-CMD ["/run.sh"]
